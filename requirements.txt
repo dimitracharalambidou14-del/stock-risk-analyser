@@ -1,0 +1,15 @@
+# Libraries this app needs.
+# Streamlit Community Cloud reads this file to know what to install
+# when it builds the live website.
+#
+# "==" pins an exact version, so the app behaves the same everywhere.
+# yfinance uses ">=" (a minimum version) instead, because Yahoo Finance
+# changes its website from time to time, and newer yfinance versions
+# contain the fixes needed to keep downloading data.
+
+streamlit==1.64.0
+yfinance>=1.7.0
+pandas==3.0.6
+numpy==2.5.3
+scipy==1.18.1
+plotly==7.1.0

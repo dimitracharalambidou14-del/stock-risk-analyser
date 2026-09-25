@@ -1,0 +1,17 @@
+# .gitignore
+# Tells Git which files and folders NOT to track or upload.
+
+# The virtual environment: large, specific to this computer,
+# and rebuilt anywhere from requirements.txt.
+.venv/
+
+# Cache files Python creates automatically.
+__pycache__/
+*.pyc
+
+# Streamlit secrets file (passwords and keys must never go online).
+.streamlit/secrets.toml
+
+# Editor settings and Windows clutter.
+.vscode/
+Thumbs.db
