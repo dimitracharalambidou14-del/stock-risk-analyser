@@ -2,7 +2,12 @@
 # Everything to do with downloading market data lives in this file.
 # app.py handles what the page looks like; this file handles getting the numbers.
 
+import csv  # reads comma-separated text, one row at a time
+import io  # lets pandas and csv read text as if it were a file
+import re  # "regular expressions": patterns for matching text
+
 import pandas as pd
+import requests  # downloads web pages (comes with Streamlit)
 import streamlit as st
 import yfinance as yf
 
@@ -67,7 +72,7 @@ def get_price_history(ticker: str, period: str = "5y") -> pd.DataFrame:
     """Download DAILY price history for one ticker from Yahoo Finance.
 
     ticker: the stock symbol, for example "AAPL" or "HSBA.L".
-    period: how far back to go, for example "1y" or "5y".
+    period: how far back to go, for example "1y", "5y" or "10y".
 
     Returns a table (a pandas DataFrame) with one row per trading day.
     If the ticker doesn't exist, the table comes back empty.
@@ -165,3 +170,121 @@ def get_aligned_closes(tickers: list[str], time_range: str = "1Y") -> pd.DataFra
 
     start_date = closes.index[-1] - DAILY_LOOKBACK[time_range]
     return closes[closes.index >= start_date]
+
+
+def get_full_aligned_closes(tickers: list[str], period: str = "10y") -> pd.DataFrame:
+    """Like get_aligned_closes, but keeps the WHOLE history for a longer period.
+
+    Used by the strategy test, which needs about 10 years of prices: some years
+    to choose the weights, then years the strategies have never seen.
+    """
+    columns = {}
+
+    for ticker in tickers:
+        history = get_price_history(ticker, period=period)
+        if not history.empty:
+            columns[ticker] = history["Close"]
+
+    if not columns:
+        return pd.DataFrame()
+
+    # Line up by date, forward-fill holiday gaps, and drop dates before every
+    # stock has a price - exactly as in get_aligned_closes.
+    return pd.DataFrame(columns).ffill().dropna()
+
+
+# ---------------------------------------------------------------------------
+# LIVE ECONOMIC DATA: interest rates and inflation from official sources.
+# All free, with no API keys. Each "fetch" function downloads the data; each
+# "parse" function turns the downloaded text into numbers. Keeping them apart
+# means the parsing can be tested without an internet connection.
+# ---------------------------------------------------------------------------
+
+# Some official websites refuse requests that don't say which program is asking,
+# so we identify ourselves like a normal web browser would.
+BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 (educational stock-risk-analyser app)"}
+
+BANK_OF_ENGLAND_URL = (
+    "https://www.bankofengland.co.uk/boeapps/database/_iadb-fromshowcolumns.asp"
+    "?csv.x=yes&SeriesCodes=IUDBEDR&UsingCodes=Y&CSVF=TN&Datefrom={start}&Dateto={end}"
+)
+ONS_CPI_URL = (
+    "https://www.ons.gov.uk/generator?format=csv"
+    "&uri=/economy/inflationandpriceindices/timeseries/d7g7/mm23"
+)
+
+
+def parse_bank_of_england_csv(text: str) -> pd.Series:
+    """Read the Bank of England's CSV download and return Bank Rate for every date.
+
+    The file looks like:   DATE,IUDBEDR
+                           01 Sep 2026,3.75
+    The rate is in percent, so 3.75 becomes 0.0375.
+    Returns a Series: dates as the index, rates as decimals, oldest first.
+    """
+    if not text.strip().upper().startswith("DATE"):
+        # The Bank of England sometimes sends an error web page instead of data.
+        raise ValueError("The Bank of England did not return the expected data.")
+    table = pd.read_csv(io.StringIO(text)).dropna()
+    dates = pd.to_datetime(table.iloc[:, 0].str.strip(), format="%d %b %Y")
+    rates = pd.Series(table.iloc[:, 1].astype(float).values / 100, index=dates)
+    return rates.sort_index()
+
+
+def parse_ons_cpi_csv(text: str) -> tuple[float, pd.Timestamp]:
+    """Read the ONS CPI download and return (latest 12-month inflation rate, its month).
+
+    The file mixes yearly rows ("2025"), quarterly rows ("2025 Q4") and monthly rows
+    ("2026 AUG"). We keep only the monthly rows and take the most recent one.
+    """
+    monthly_rows = []
+    for row in csv.reader(io.StringIO(text)):
+        # re.fullmatch checks the WHOLE label has the pattern "4 digits, space, 3 letters".
+        if len(row) >= 2 and re.fullmatch(r"\d{4} [A-Z]{3}", row[0].strip()):
+            monthly_rows.append(row)
+    if not monthly_rows:
+        raise ValueError("The ONS did not return the expected data.")
+    label, value = monthly_rows[-1][0].strip(), monthly_rows[-1][1]
+    month = pd.to_datetime(label.title(), format="%Y %b")  # "2026 AUG" -> 1 Aug 2026
+    return float(value) / 100, month
+
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def get_uk_bank_rate_history() -> pd.Series:
+    """Bank of England Bank Rate for every working day over the last 11 years.
+
+    Returns a Series of decimals (0.0375 = 3.75%). The latest value is the last one.
+    Cached for 12 hours.
+    """
+    today = pd.Timestamp.today()
+    url = BANK_OF_ENGLAND_URL.format(
+        start=(today - pd.DateOffset(years=11)).strftime("%d/%b/%Y"),
+        end=today.strftime("%d/%b/%Y"),
+    )
+    response = requests.get(url, headers=BROWSER_HEADERS, timeout=20)
+    response.raise_for_status()  # turns a failed download into an error we can catch
+    return parse_bank_of_england_csv(response.text)
+
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def get_uk_cpi_inflation() -> tuple[float, pd.Timestamp]:
+    """The ONS's latest UK CPI 12-month inflation rate, e.g. (0.038, month). Cached for 12 hours."""
+    response = requests.get(ONS_CPI_URL, headers=BROWSER_HEADERS, timeout=15)
+    response.raise_for_status()
+    return parse_ons_cpi_csv(response.text)
+
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def get_us_treasury_bill_history() -> pd.Series:
+    """The US 3-month (13-week) Treasury bill yield for each day over the last 10 years.
+
+    From Yahoo Finance's ticker ^IRX, which is quoted in percent (3.9 = 3.9%), so we
+    divide by 100. Yahoo occasionally records a yield of exactly 0 by mistake, so
+    exact zeros are treated as missing and filled with the previous day's value.
+    """
+    history = yf.Ticker("^IRX").history(period="10y")
+    yields = history["Close"].replace(0, float("nan")).ffill().dropna()
+    if yields.empty:
+        raise ValueError("No Treasury bill data returned.")
+    yields.index = yields.index.tz_localize(None)
+    return yields / 100

@@ -440,13 +440,19 @@ def efficient_frontier_chart(
 
 
 def fan_chart(
-    bands: pd.DataFrame, sample_paths: np.ndarray, start_value: float, title: str
+    bands: pd.DataFrame,
+    sample_paths: np.ndarray,
+    paid_in: np.ndarray,
+    goal: float | None,
+    title: str,
+    y_title: str = "Portfolio value (£)",
 ) -> go.Figure:
     """A "fan chart" of simulated future values.
 
     bands: the output of percentile_bands (columns "5th", "50th", "95th"; index = years).
     sample_paths: a few individual simulated paths, drawn faintly for illustration.
-    start_value: the amount invested, drawn as a dotted line.
+    paid_in: the running total paid in, month by month (drawn as a dotted line).
+    goal: the target amount (drawn as a dashed line), or None for no goal.
     """
     fig = go.Figure()
     time_in_years = bands.index
@@ -503,19 +509,32 @@ def fan_chart(
         )
     )
 
-    # 4. A dotted line at the amount invested, for reference.
-    fig.add_hline(
-        y=start_value,
-        line_dash="dot",
-        line_color="grey",
-        annotation_text="Amount invested",
-        annotation_position="bottom right",
+    # 4. The total paid in so far: a dotted line that rises with each contribution.
+    fig.add_trace(
+        go.Scatter(
+            x=time_in_years,
+            y=paid_in,
+            mode="lines",
+            line=dict(width=2, color="grey", dash="dot"),
+            name="Total paid in",
+            legendrank=4,
+        )
     )
+
+    # 5. The goal, if there is one, as a dashed horizontal line.
+    if goal is not None:
+        fig.add_hline(
+            y=goal,
+            line_dash="dash",
+            line_color="seagreen",
+            annotation_text="Your goal",
+            annotation_position="top left",
+        )
 
     fig.update_layout(
         title=title,
         xaxis_title="Years from now",
-        yaxis_title="Portfolio value",
+        yaxis_title=y_title,
         hovermode="x unified",
         height=500,
         # Plotly automatically REVERSES the legend when a chart has a shaded area.
@@ -525,5 +544,43 @@ def fan_chart(
     )
     # Show the values with thousands separators, e.g. 12,500.
     fig.update_yaxes(tickformat=",.0f")
+
+    return fig
+
+
+def backtest_chart(wealth_table: pd.DataFrame) -> go.Figure:
+    """Growth of 100 for each strategy in the walk-forward (out-of-sample) test.
+
+    wealth_table: one column per strategy, daily values starting at 100.
+    Equal weight is drawn as a thick dashed line, because it's the benchmark
+    every other strategy has to beat.
+    """
+    fig = go.Figure()
+
+    for name in wealth_table.columns:
+        is_benchmark = name == "Equal weight"  # True for the benchmark, False otherwise
+        fig.add_trace(
+            go.Scatter(
+                x=wealth_table.index,
+                y=wealth_table[name],
+                mode="lines",
+                name=name,
+                # "X if condition else Y" picks X when the condition is true.
+                line=dict(width=3 if is_benchmark else 1.5, dash="dash" if is_benchmark else "solid"),
+            )
+        )
+
+    # A dotted line at 100 marks the starting value.
+    fig.add_hline(y=100, line_dash="dot", line_color="grey")
+
+    fig.update_layout(
+        title="Out-of-sample test: growth of 100 for each strategy (after trading costs)",
+        xaxis_title="Date",
+        yaxis_title="Value (start = 100)",
+        hovermode="x unified",
+        height=500,
+        # Put the long strategy names underneath the chart.
+        legend=dict(orientation="h", yanchor="top", y=-0.2),
+    )
 
     return fig

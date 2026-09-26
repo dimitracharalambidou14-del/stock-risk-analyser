@@ -96,7 +96,11 @@ def weights_sum_minus_one(weights: np.ndarray) -> float:
 
 
 def optimise(
-    objective, n_stocks: int, max_weight: float, extra_constraints: list | None = None
+    objective,
+    n_stocks: int,
+    max_weight: float,
+    extra_constraints: list | None = None,
+    starting_guess: np.ndarray | None = None,
 ) -> np.ndarray:
     """Find the weights that make objective(weights) as SMALL as possible.
 
@@ -104,9 +108,11 @@ def optimise(
       - every weight is between 0 and max_weight (no short-selling, no borrowing)
       - the weights add up to 1 (fully invested)
       - plus any extra_constraints passed in (e.g. "hit this target return")
+
+    starting_guess: where the search begins. If none is given, start from equal weights.
     """
-    # Start the search from equal weights.
-    starting_guess = np.full(n_stocks, 1 / n_stocks)
+    if starting_guess is None:
+        starting_guess = np.full(n_stocks, 1 / n_stocks)
 
     # One (lowest, highest) pair per stock. [x] * 3 makes the list [x, x, x].
     bounds = [(0.0, max_weight)] * n_stocks
