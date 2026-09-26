@@ -176,7 +176,6 @@ All sources are free and need no API keys. Data is cached (prices for up to an h
 - **Fat tails.** The normal-distribution methods (parametric VaR, the normal Monte Carlo model) understate extreme losses. The historical methods are shown alongside for that reason.
 - **Hindsight in stock selection.** Users pick stocks they know today, which tend to be the ones that did well (a form of survivorship bias).
 - **Currency, tax and costs.** Returns are in each stock's own currency, and currency movements are not modelled. Tax wrappers (ISAs, pensions) and taxes are ignored. Trading costs appear only in the strategy test, and fees only in the goal planner.
-- **Free data.** Yahoo Finance is unofficial, and can be delayed, occasionally wrong, or unavailable.
 - **Short-term rates.** The risk-free rate is a short-term rate. Long-term plans might be better served by long-term government bond yields.
 
 ## Ideas for future improvements
@@ -193,4 +192,4 @@ All sources are free and need no API keys. Data is cached (prices for up to an h
 
 Python · Streamlit · pandas · NumPy · SciPy · Plotly · yfinance · requests
 
-**Author:** *your name* · *link to your LinkedIn profile*
+**Author:** Dimitra Charalambidou · http://linkedin.com/in/dimitra-charalambidou-397488383
